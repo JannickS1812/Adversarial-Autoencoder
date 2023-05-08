@@ -1,7 +1,11 @@
 __all__ = ['vis_distributions', 'vis_encoding', 'vis_manifold', 'vis_style_manifold', 'vis_reconstruction', 'vis_results', 'visualizes']
+
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button, Slider
+from matplotlib import rcParams
 from scipy.stats import norm
+from scipy.special import comb
 
 import torch
 import torchvision
@@ -9,19 +13,246 @@ import torch.nn.functional as F
 
 from prior import gaussian, gaussian_mixture, swiss_roll
 
-
 labels_map = {
-        0: "0",
-        1: "1",
-        2: "2",
-        3: "3",
-        4: "4",
-        5: "5",
-        6: "6",
-        7: "7",
-        8: "8",
-        9: "9",
-    }
+    0: "0",
+    1: "1",
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "7",
+    8: "8",
+    9: "9",
+}
+
+
+class Interpolater:
+    def __init__(self, model, path, data, dev):
+
+        print(1)
+
+        model.to(dev)
+        model.load_state_dict(torch.load(path))
+        embeddings = []
+        labels = []
+        for i, (dat, label) in enumerate(data):
+            label_idc = np.argmax(label.cpu().detach().numpy(), axis=2)
+            enc = model.encode(dat.to(dev))
+            if type(enc) == tuple:
+                enc = model.reparam(*enc)
+            embeddings.extend(list(enc.cpu().detach().numpy()))
+            labels.append(label_idc)
+        embeddings = np.array(embeddings)
+        assert embeddings.shape[1] == 2
+
+        self.embeddings = embeddings
+        self.model = model
+        self.dev = dev
+
+        print(2)
+
+        self.rc_dot = None
+        self.lc_dot = None
+        self.references = []
+
+        self.fig, self.axes = plt.subplots(1, 2, figsize=(3, 3))
+        plt.subplots_adjust(bottom=0.25)
+        self.axes[0].axis('equal')
+        self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
+        self.axes[1].axis('equal')
+
+        # clear button
+        ax_btn = self.fig.add_axes([0.8, 0.095, 0.1, 0.04])
+        b = Button(ax_btn, 'Clear')
+        b.on_clicked(self.__on_press)
+
+        # interpolation slider
+        ax_slider = self.fig.add_axes([0.1, 0.1, 0.6, 0.03])
+        self.slider = Slider(
+            ax=ax_slider,
+            label='T [0-1]',
+            valmin=0,
+            valmax=1,
+            valinit=.5,
+        )
+        self.slider.on_changed(self.__on_slide)
+
+        # add points for curve via click event
+        self.fig.canvas.mpl_connect('button_press_event', self.__on_click)
+        plt.show()
+
+    def __on_click(self, event):
+        if event.inaxes != self.axes[0]:
+            return
+        if event.button == 1:
+            self.lc_dot = np.array([event.xdata, event.ydata])
+        elif event.button == 3:
+            self.rc_dot = np.array([event.xdata, event.ydata])
+        self.__update()
+
+    def __on_press(self, _):
+        self.rc_dot = None
+        self.lc_dot = None
+        self.__update()
+
+    def __on_slide(self, _):
+        self.__update()
+
+    def __update(self):
+        for r in self.references:
+            r.remove()
+        self.references = []
+        if self.rc_dot is not None and self.lc_dot is not None:
+            self.references.append(self.axes[0].plot([self.rc_dot[0], self.lc_dot[0]],
+                                                     [self.rc_dot[1], self.lc_dot[1]],
+                                                     color='k',
+                                                     linewidth=2)[0])
+
+            curr_point = self.slider.val * self.rc_dot + (1 - self.slider.val) * self.lc_dot
+            self.references.append(self.axes[0].scatter(curr_point[0],
+                                                        curr_point[1],
+                                                        color='r',
+                                                        edgecolor='k',
+                                                        s=2.5 * rcParams['lines.markersize'] ** 2,
+                                                        zorder=10))
+
+            to_imag = torchvision.transforms.ToPILImage()
+            self.references.append(
+                self.axes[1].imshow(to_imag(self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)), cmap="gray"))
+
+        if self.rc_dot is not None:
+            self.references.append(self.axes[0].scatter(self.rc_dot[0],
+                                                        self.rc_dot[1],
+                                                        color='k'))
+
+        if self.lc_dot is not None:
+            self.references.append(self.axes[0].scatter(self.lc_dot[0],
+                                                        self.lc_dot[1],
+                                                        color='k'))
+
+        plt.draw()
+
+    def __bezier(self, control_points, t=None):
+        """Evaluates a Bezier curve defined by control_points at points t."""
+        if t is None:
+            t = np.linspace(0, 1, 200)
+        return sum([np.outer(self.__bernstein_poly(i, control_points.shape[1], t), x) for i, x in enumerate(X)])
+
+    def __bernstein_poly(self, i, N, t):
+        return comb(N, i) * t ** i * (1. - t) ** (N - i)
+
+
+class Interpolater:
+    def __init__(self, model, path, data, dev):
+
+        model.to(dev)
+        model.load_state_dict(torch.load(path))
+        embeddings = []
+        labels = []
+        for i, (dat, label) in enumerate(data):
+            label_idc = np.argmax(label.cpu().detach().numpy(), axis=2)
+            enc = model.encode(dat.to(dev))
+            if type(enc) == tuple:
+                enc = model.reparam(*enc)
+            embeddings.extend(list(enc.cpu().detach().numpy()))
+            labels.append(label_idc)
+        embeddings = np.array(embeddings)
+        assert embeddings.shape[1] == 2
+
+        self.embeddings = embeddings
+        self.model = model
+        self.dev = dev
+
+        self.rc_dot = None
+        self.lc_dot = None
+        self.references = []
+
+        self.fig, self.axes = plt.subplots(1, 2, figsize=(16, 9))
+        plt.subplots_adjust(bottom=0.25)
+        self.axes[0].axis('equal')
+        self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
+        self.axes[1].axis('equal')
+
+        # clear button
+        ax_btn = self.fig.add_axes([0.8, 0.095, 0.1, 0.04])
+        b = Button(ax_btn, 'Clear')
+        b.on_clicked(self.__on_press)
+
+        # interpolation slider
+        ax_slider = self.fig.add_axes([0.1, 0.1, 0.6, 0.03])
+        self.slider = Slider(
+            ax=ax_slider,
+            label='T [0-1]',
+            valmin=0,
+            valmax=1,
+            valinit=.5,
+        )
+        self.slider.on_changed(self.__on_slide)
+
+        # add points for curve via click event
+        self.fig.canvas.mpl_connect('button_press_event', self.__on_click)
+        plt.show()
+
+    def __on_click(self, event):
+        if event.inaxes != self.axes[0]:
+            return
+        if event.button == 1:
+            self.lc_dot = np.array([event.xdata, event.ydata])
+        elif event.button == 3:
+            self.rc_dot = np.array([event.xdata, event.ydata])
+        self.__update()
+
+    def __on_press(self, _):
+        self.rc_dot = None
+        self.lc_dot = None
+        self.__update()
+
+    def __on_slide(self, _):
+        self.__update()
+
+    def __update(self):
+        for r in self.references:
+            r.remove()
+        self.references = []
+        if self.rc_dot is not None and self.lc_dot is not None:
+            self.references.append(self.axes[0].plot([self.rc_dot[0], self.lc_dot[0]],
+                                                     [self.rc_dot[1], self.lc_dot[1]],
+                                                     color='k',
+                                                     linewidth=2)[0])
+
+            curr_point = self.slider.val * self.rc_dot + (1 - self.slider.val) * self.lc_dot
+            self.references.append(self.axes[0].scatter(curr_point[0],
+                                                        curr_point[1],
+                                                        color='r',
+                                                        edgecolor='k',
+                                                        s=2.5 * rcParams['lines.markersize'] ** 2,
+                                                        zorder=10))
+
+            to_imag = torchvision.transforms.ToPILImage()
+            self.references.append(
+                self.axes[1].imshow(to_imag(self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)), cmap="gray"))
+
+        if self.rc_dot is not None:
+            self.references.append(self.axes[0].scatter(self.rc_dot[0],
+                                                        self.rc_dot[1],
+                                                        color='k'))
+
+        if self.lc_dot is not None:
+            self.references.append(self.axes[0].scatter(self.lc_dot[0],
+                                                        self.lc_dot[1],
+                                                        color='k'))
+
+        plt.draw()
+
+    def __bezier(self, control_points, t=None):
+        """Evaluates a Bezier curve defined by control_points at points t."""
+        if t is None:
+            t = np.linspace(0, 1, 200)
+        return sum([np.outer(self.__bernstein_poly(i, control_points.shape[1], t), x) for i, x in enumerate(X)])
+
+    def __bernstein_poly(self, i, N, t):
+        return comb(N, i) * t ** i * (1. - t) ** (N - i)
 
 
 def discrete_cmap(N, base_cmap=None):
@@ -67,8 +298,8 @@ def vis_distributions():
             ax = axes[j, i]
             s = ax.scatter(z[:, 0], z[:, 1], s=25, c=z_id, marker='o', edgecolor='none', cmap=discrete_cmap(10, 'jet'))
             ax.grid(True)
-            #ax.set_xlim([-4.5, 4.5])
-            #ax.set_ylim([-4.5, 4.5])
+            # ax.set_xlim([-4.5, 4.5])
+            # ax.set_ylim([-4.5, 4.5])
 
             if j == 1:
                 ax.set_xlabel(prior_type)
@@ -83,11 +314,11 @@ def vis_encoding(model, data, dev, parent=None):
     x = []
     y = []
     labels = []
-    axs = parent.add_subplot(1,1,1)
+    axs = parent.add_subplot(1, 1, 1)
     axs.axis('equal')
     for dat, label in data:
         dat = dat.to(dev)
-        label_idc = np.argmax(label.cpu().detach().numpy(),axis=2)
+        label_idc = np.argmax(label.cpu().detach().numpy(), axis=2)
         enc = model.encode(dat)
         if type(enc) == tuple:
             enc = model.reparam(*enc)
@@ -97,25 +328,25 @@ def vis_encoding(model, data, dev, parent=None):
         labels.append(label_idc)
 
     s = axs.scatter(y, x, c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
-    plt.legend(s.legend_elements()[0],np.unique(labels))
+    plt.legend(s.legend_elements()[0], np.unique(labels))
 
 
 def vis_manifold(model, device, n_row_col=20):
-    x = norm.ppf(np.linspace(0.05,0.95,n_row_col),scale=5.0)
-    y = norm.ppf(np.linspace(0.05,0.95,n_row_col),scale=5.0)
+    x = norm.ppf(np.linspace(0.05, 0.95, n_row_col), scale=5.0)
+    y = norm.ppf(np.linspace(0.05, 0.95, n_row_col), scale=5.0)
     x = np.flip(x)
 
-    fig = plt.figure(figsize=(8,8))
+    fig = plt.figure(figsize=(8, 8))
     to_imag = torchvision.transforms.ToPILImage()
     for i in range(len(x)):
         for j in range(len(y)):
-            fig.add_subplot(n_row_col, n_row_col, i*n_row_col+j+1)
+            fig.add_subplot(n_row_col, n_row_col, i * n_row_col + j + 1)
 
             sample = torch.tensor([[x[i], y[j]]])
             sample = sample.to(torch.float32)
             sample = sample.to(device)
             tens = model.decode(sample)
-            plt.imshow(to_imag(tens.reshape(28,28)), cmap="gray")
+            plt.imshow(to_imag(tens.reshape(28, 28)), cmap="gray")
             plt.axis("off")
     plt.subplots_adjust(wspace=0, hspace=0, left=0, right=1, bottom=0, top=1)
 
@@ -150,7 +381,6 @@ def vis_reconstruction(model, data, device,
                        parent=None,
                        cols=10,
                        rows=3):
-
     if parent is None:
         parent = plt.figure()
 
@@ -164,7 +394,7 @@ def vis_reconstruction(model, data, device,
         axs.set_title(labels_map[lab_idx[0]])
         axs.axis("off")
         axs.imshow(img, cmap="gray")
-        if i > (rows-1)*cols:
+        if i > (rows - 1) * cols:
             imgs.append(img)
 
     model.to(device)
@@ -204,8 +434,8 @@ def visualize(model, test, vis_test, device):
     vis_manifold(model, device)
 
 
-def load_and_visualize(model,path,train,test,device):
+def load_and_visualize(model, path, train, test, device):
     model.load_state_dict(torch.load(path))
     model.eval()
-    visualize(model,train,test,device)
-    
+    visualize(model, train, test, device)
+
