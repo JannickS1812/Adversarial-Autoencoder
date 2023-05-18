@@ -11,7 +11,7 @@ import torch
 import torchvision
 import torch.nn.functional as F
 
-from prior import gaussian, gaussian_mixture, swiss_roll
+from .prior import gaussian, gaussian_mixture, swiss_roll
 
 labels_map = {
     0: "0",
@@ -28,7 +28,7 @@ labels_map = {
 
 
 class Interpolater:
-    def __init__(self, model, path, data, dev):
+    def __init__(self, model, path, data, dev, label=None):
 
         print(1)
 
@@ -48,6 +48,7 @@ class Interpolater:
 
         self.embeddings = embeddings
         self.model = model
+        self.label = label
         self.dev = dev
 
         print(2)
@@ -137,7 +138,7 @@ class Interpolater:
         """Evaluates a Bezier curve defined by control_points at points t."""
         if t is None:
             t = np.linspace(0, 1, 200)
-        return sum([np.outer(self.__bernstein_poly(i, control_points.shape[1], t), x) for i, x in enumerate(X)])
+        return sum([np.outer(self.__bernstein_poly(i, control_points.shape[1], t), x) for i, x in enumerate(control_points)])
 
     def __bernstein_poly(self, i, N, t):
         return comb(N, i) * t ** i * (1. - t) ** (N - i)
@@ -230,8 +231,11 @@ class Interpolater:
                                                         zorder=10))
 
             to_imag = torchvision.transforms.ToPILImage()
-            self.references.append(
-                self.axes[1].imshow(to_imag(self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)), cmap="gray"))
+            if self.label is None:
+                img = self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)
+            else:
+                img = self.model.decode(torch.Tensor(curr_point).to(self.dev), self.label).reshape(28, 28)
+            self.references.append(self.axes[1].imshow(to_imag(img), cmap="gray"))
 
         if self.rc_dot is not None:
             self.references.append(self.axes[0].scatter(self.rc_dot[0],
