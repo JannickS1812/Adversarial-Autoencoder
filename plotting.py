@@ -28,17 +28,13 @@ labels_map = {
 
 
 class Interpolater:
-    def __init__(self, model, path, data, dev, label=None):
+    def __init__(self, model, data, label=None):
 
-        print(1)
-
-        model.to(dev)
-        model.load_state_dict(torch.load(path))
         embeddings = []
         labels = []
         for i, (dat, label) in enumerate(data):
             label_idc = np.argmax(label.cpu().detach().numpy(), axis=2)
-            enc = model.encode(dat.to(dev))
+            enc = model.encode(dat)
             if type(enc) == tuple:
                 enc = model.reparam(*enc)
             embeddings.extend(list(enc.cpu().detach().numpy()))
@@ -49,121 +45,6 @@ class Interpolater:
         self.embeddings = embeddings
         self.model = model
         self.label = label
-        self.dev = dev
-
-        print(2)
-
-        self.rc_dot = None
-        self.lc_dot = None
-        self.references = []
-
-        self.fig, self.axes = plt.subplots(1, 2, figsize=(3, 3))
-        plt.subplots_adjust(bottom=0.25)
-        self.axes[0].axis('equal')
-        self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
-        self.axes[1].axis('equal')
-
-        # clear button
-        ax_btn = self.fig.add_axes([0.8, 0.095, 0.1, 0.04])
-        b = Button(ax_btn, 'Clear')
-        b.on_clicked(self.__on_press)
-
-        # interpolation slider
-        ax_slider = self.fig.add_axes([0.1, 0.1, 0.6, 0.03])
-        self.slider = Slider(
-            ax=ax_slider,
-            label='T [0-1]',
-            valmin=0,
-            valmax=1,
-            valinit=.5,
-        )
-        self.slider.on_changed(self.__on_slide)
-
-        # add points for curve via click event
-        self.fig.canvas.mpl_connect('button_press_event', self.__on_click)
-        plt.show()
-
-    def __on_click(self, event):
-        if event.inaxes != self.axes[0]:
-            return
-        if event.button == 1:
-            self.lc_dot = np.array([event.xdata, event.ydata])
-        elif event.button == 3:
-            self.rc_dot = np.array([event.xdata, event.ydata])
-        self.__update()
-
-    def __on_press(self, _):
-        self.rc_dot = None
-        self.lc_dot = None
-        self.__update()
-
-    def __on_slide(self, _):
-        self.__update()
-
-    def __update(self):
-        for r in self.references:
-            r.remove()
-        self.references = []
-        if self.rc_dot is not None and self.lc_dot is not None:
-            self.references.append(self.axes[0].plot([self.rc_dot[0], self.lc_dot[0]],
-                                                     [self.rc_dot[1], self.lc_dot[1]],
-                                                     color='k',
-                                                     linewidth=2)[0])
-
-            curr_point = self.slider.val * self.rc_dot + (1 - self.slider.val) * self.lc_dot
-            self.references.append(self.axes[0].scatter(curr_point[0],
-                                                        curr_point[1],
-                                                        color='r',
-                                                        edgecolor='k',
-                                                        s=2.5 * rcParams['lines.markersize'] ** 2,
-                                                        zorder=10))
-
-            to_imag = torchvision.transforms.ToPILImage()
-            self.references.append(
-                self.axes[1].imshow(to_imag(self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)), cmap="gray"))
-
-        if self.rc_dot is not None:
-            self.references.append(self.axes[0].scatter(self.rc_dot[0],
-                                                        self.rc_dot[1],
-                                                        color='k'))
-
-        if self.lc_dot is not None:
-            self.references.append(self.axes[0].scatter(self.lc_dot[0],
-                                                        self.lc_dot[1],
-                                                        color='k'))
-
-        plt.draw()
-
-    def __bezier(self, control_points, t=None):
-        """Evaluates a Bezier curve defined by control_points at points t."""
-        if t is None:
-            t = np.linspace(0, 1, 200)
-        return sum([np.outer(self.__bernstein_poly(i, control_points.shape[1], t), x) for i, x in enumerate(control_points)])
-
-    def __bernstein_poly(self, i, N, t):
-        return comb(N, i) * t ** i * (1. - t) ** (N - i)
-
-
-class Interpolater:
-    def __init__(self, model, path, data, dev):
-
-        model.to(dev)
-        model.load_state_dict(torch.load(path))
-        embeddings = []
-        labels = []
-        for i, (dat, label) in enumerate(data):
-            label_idc = np.argmax(label.cpu().detach().numpy(), axis=2)
-            enc = model.encode(dat.to(dev))
-            if type(enc) == tuple:
-                enc = model.reparam(*enc)
-            embeddings.extend(list(enc.cpu().detach().numpy()))
-            labels.append(label_idc)
-        embeddings = np.array(embeddings)
-        assert embeddings.shape[1] == 2
-
-        self.embeddings = embeddings
-        self.model = model
-        self.dev = dev
 
         self.rc_dot = None
         self.lc_dot = None
@@ -232,7 +113,7 @@ class Interpolater:
 
             to_imag = torchvision.transforms.ToPILImage()
             if self.label is None:
-                img = self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)
+                img = self.model.decode(torch.Tensor(curr_point)).reshape(28, 28)
             else:
                 img = self.model.decode(torch.Tensor(curr_point).to(self.dev), self.label).reshape(28, 28)
             self.references.append(self.axes[1].imshow(to_imag(img), cmap="gray"))
