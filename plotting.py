@@ -28,33 +28,35 @@ labels_map = {
 
 
 class Interpolater:
-    def __init__(self, model, data, label=None):
+    def __init__(self, model, data, dev, label=None):
+
+        self.model = model
+        self.dev = dev
+        self.label = label
+        self.__interpolate = label is None
 
         embeddings = []
         labels = []
         for i, (dat, label) in enumerate(data):
             label_idc = np.argmax(label.cpu().detach().numpy(), axis=2)
-            enc = model.encode(dat)
+            enc = model.encode(dat.to(dev))
             if type(enc) == tuple:
                 enc = model.reparam(*enc)
             embeddings.extend(list(enc.cpu().detach().numpy()))
             labels.append(label_idc)
         embeddings = np.array(embeddings)
         assert embeddings.shape[1] == 2
-
         self.embeddings = embeddings
-        self.model = model
-        self.label = label
 
         self.rc_dot = None
         self.lc_dot = None
         self.references = []
 
-        self.fig, self.axes = plt.subplots(1, 2, figsize=(16, 9))
+        self.fig, self.axes = plt.subplots(1, 2, figsize=(9, 6))
         plt.subplots_adjust(bottom=0.25)
         self.axes[0].axis('equal')
         self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
-        self.axes[1].axis('equal')
+        self.axes[1].axis('off')
 
         # clear button
         ax_btn = self.fig.add_axes([0.8, 0.095, 0.1, 0.04])
@@ -79,7 +81,7 @@ class Interpolater:
     def __on_click(self, event):
         if event.inaxes != self.axes[0]:
             return
-        if event.button == 1:
+        if event.button == 1 and self.__interpolate:
             self.lc_dot = np.array([event.xdata, event.ydata])
         elif event.button == 3:
             self.rc_dot = np.array([event.xdata, event.ydata])
@@ -97,25 +99,28 @@ class Interpolater:
         for r in self.references:
             r.remove()
         self.references = []
-        if self.rc_dot is not None and self.lc_dot is not None:
-            self.references.append(self.axes[0].plot([self.rc_dot[0], self.lc_dot[0]],
-                                                     [self.rc_dot[1], self.lc_dot[1]],
-                                                     color='k',
-                                                     linewidth=2)[0])
 
-            curr_point = self.slider.val * self.rc_dot + (1 - self.slider.val) * self.lc_dot
-            self.references.append(self.axes[0].scatter(curr_point[0],
-                                                        curr_point[1],
-                                                        color='r',
-                                                        edgecolor='k',
-                                                        s=2.5 * rcParams['lines.markersize'] ** 2,
-                                                        zorder=10))
+        if self.rc_dot is not None and (self.lc_dot is not None or not self.__interpolate):
+            if self.__interpolate:
+                self.references.append(self.axes[0].plot([self.rc_dot[0], self.lc_dot[0]],
+                                                         [self.rc_dot[1], self.lc_dot[1]],
+                                                         color='k',
+                                                         linewidth=2)[0])
+
+                curr_point = self.slider.val * self.rc_dot + (1 - self.slider.val) * self.lc_dot
+                self.references.append(self.axes[0].scatter(curr_point[0],
+                                                            curr_point[1],
+                                                            color='r',
+                                                            edgecolor='k',
+                                                            s=2.5 * rcParams['lines.markersize'] ** 2,
+                                                            zorder=10))
+                img = self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)
+            else:
+                curr_point = self.rc_dot
+                label = F.one_hot(self.label, 10).to(self.dev)
+                img = self.model.decode(torch.Tensor(curr_point).to(self.dev), label).reshape(28, 28)
 
             to_imag = torchvision.transforms.ToPILImage()
-            if self.label is None:
-                img = self.model.decode(torch.Tensor(curr_point)).reshape(28, 28)
-            else:
-                img = self.model.decode(torch.Tensor(curr_point).to(self.dev), self.label).reshape(28, 28)
             self.references.append(self.axes[1].imshow(to_imag(img), cmap="gray"))
 
         if self.rc_dot is not None:
@@ -306,7 +311,7 @@ def vis_results(model, train, test, device):
 
 
 def vis_training(**kwargs):
-    plt.figure(constrained_layout=True, figsize=(12, 6))
+    plt.figure(constrained_layout=True, figsize=(8, 4))
     for key, losses in kwargs.items():
         plt.plot(losses, label=key)
     plt.xlabel('Epoch')

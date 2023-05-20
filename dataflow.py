@@ -26,10 +26,10 @@ def load_MNIST():
     )
 
     mnist_train = torchvision.datasets.MNIST(
-        'C:\\Git\\UNI\\39-M-Inf-VML Vertiefung Maschinelles Lernen\\Exercise Adversial Autoencoders\\MNIST', train=True,
+        'MNIST', train=True,
         download=True, transform=transform, target_transform=target_transform)
     mnist_test = torchvision.datasets.MNIST(
-        'C:\\Git\\UNI\\39-M-Inf-VML Vertiefung Maschinelles Lernen\\Exercise Adversial Autoencoders\\MNIST',
+        'MNIST',
         train=False, download=True, transform=transform, target_transform=target_transform)
 
     mnist_vis_test = torchvision.datasets.MNIST(
