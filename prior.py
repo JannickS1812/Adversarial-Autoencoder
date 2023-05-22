@@ -4,6 +4,27 @@ from math import sin, cos, sqrt
 import torch
 import torch.nn.functional as F
 
+def sample(prior_type, n_samples, use_label_info=True):
+    # get samples from prior
+    if prior_type == 'mixture':
+        z_id = np.random.randint(0, 10, size=[n_samples])
+        if use_label_info:
+            z = gaussian_mixture(n_samples, 2, label_indices=z_id)
+        else:
+            z = gaussian_mixture(n_samples, 2)
+    elif prior_type == 'swiss_roll':
+        z_id = np.random.randint(0, 10, size=[n_samples])
+        if use_label_info:
+            z = swiss_roll(n_samples, 2, label_indices=z_id)
+        else:
+            z = swiss_roll(n_samples, 2)
+    elif prior_type == 'normal':
+        z, z_id = gaussian(n_samples, 2, use_label_info=use_label_info)
+    else:
+        raise Exception("[!] There is no option for " + prior_type)
+
+    return z, z_id
+
 
 def uniform(batch_size, n_dim, n_labels=10, minv=-1, maxv=1, label_indices=None):
     if label_indices is not None:

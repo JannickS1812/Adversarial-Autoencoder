@@ -11,7 +11,7 @@ import torch
 import torchvision
 import torch.nn.functional as F
 
-from .prior import gaussian, gaussian_mixture, swiss_roll
+from .prior import sample
 
 labels_map = {
     0: "0",
@@ -55,24 +55,30 @@ class Interpolater:
         self.fig, self.axes = plt.subplots(1, 2, figsize=(9, 6))
         plt.subplots_adjust(bottom=0.25)
         self.axes[0].axis('equal')
-        self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
+        self.axes[0].set_xticklabels([])
+        self.axes[0].set_yticklabels([])
         self.axes[1].axis('off')
 
-        # clear button
-        ax_btn = self.fig.add_axes([0.8, 0.095, 0.1, 0.04])
-        b = Button(ax_btn, 'Clear')
-        b.on_clicked(self.__on_press)
+        if self.__interpolate:
+            self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], c=labels, s=2, cmap=discrete_cmap(10, 'jet'))
 
-        # interpolation slider
-        ax_slider = self.fig.add_axes([0.1, 0.1, 0.6, 0.03])
-        self.slider = Slider(
-            ax=ax_slider,
-            label='T [0-1]',
-            valmin=0,
-            valmax=1,
-            valinit=.5,
-        )
-        self.slider.on_changed(self.__on_slide)
+            # clear button
+            ax_btn = self.fig.add_axes([0.8, 0.095, 0.1, 0.04])
+            b = Button(ax_btn, 'Clear')
+            b.on_clicked(self.__on_press)
+
+            # interpolation slider
+            ax_slider = self.fig.add_axes([0.1, 0.1, 0.6, 0.03])
+            self.slider = Slider(
+                ax=ax_slider,
+                label='T [0-1]',
+                valmin=0,
+                valmax=1,
+                valinit=.5,
+            )
+            self.slider.on_changed(self.__on_slide)
+        else:
+            self.axes[0].scatter(embeddings[:, 0], embeddings[:, 1], s=2)
 
         # add points for curve via click event
         self.fig.canvas.mpl_connect('button_press_event', self.__on_click)
@@ -81,9 +87,9 @@ class Interpolater:
     def __on_click(self, event):
         if event.inaxes != self.axes[0]:
             return
-        if event.button == 1 and self.__interpolate:
+        if event.button == 3 and self.__interpolate:
             self.lc_dot = np.array([event.xdata, event.ydata])
-        elif event.button == 3:
+        elif event.button == 1:
             self.rc_dot = np.array([event.xdata, event.ydata])
         self.__update()
 
@@ -117,8 +123,10 @@ class Interpolater:
                 img = self.model.decode(torch.Tensor(curr_point).to(self.dev)).reshape(28, 28)
             else:
                 curr_point = self.rc_dot
-                label = F.one_hot(self.label, 10).to(self.dev)
-                img = self.model.decode(torch.Tensor(curr_point).to(self.dev), label).reshape(28, 28)
+
+                label_onehot = np.zeros([1,10])
+                label_onehot[0, self.label] = 1
+                img = self.model.decode(torch.Tensor([curr_point]).to(self.dev), torch.Tensor(label_onehot).to(self.dev)).reshape(28, 28)
 
             to_imag = torchvision.transforms.ToPILImage()
             self.references.append(self.axes[1].imshow(to_imag(img), cmap="gray"))
@@ -154,36 +162,13 @@ def discrete_cmap(N, base_cmap=None):
 
 def vis_distributions():
     batch_size = 10000
-    n_dim = 2
-
-    def sample(prior_type, use_label_info=True):
-        # get samples from prior
-        if prior_type == 'mixGaussian':
-            z_id = np.random.randint(0, 10, size=[batch_size])
-            if use_label_info:
-                z = gaussian_mixture(batch_size, n_dim, label_indices=z_id)
-            else:
-                z = gaussian_mixture(batch_size, n_dim)
-        elif prior_type == 'swiss_roll':
-            z_id = np.random.randint(0, 10, size=[batch_size])
-            if use_label_info:
-                z = swiss_roll(batch_size, n_dim, label_indices=z_id)
-            else:
-                z = swiss_roll(batch_size, n_dim)
-        elif prior_type == 'normal':
-            z, z_id = gaussian(batch_size, n_dim, use_label_info=use_label_info)
-        else:
-            raise Exception("[!] There is no option for " + prior_type)
-
-        return z, z_id
 
     # plot
-    plt.rcParams['figure.figsize'] = [16, 9]
-    plt.figure()
+    plt.rcParams['figure.figsize'] = [12, 8]
     fig, axes = plt.subplots(2, 3)
-    for i, prior_type in enumerate(['normal', 'mixGaussian', 'swiss_roll']):
+    for i, prior_type in enumerate(['normal', 'mixture', 'swiss_roll']):
         for j, tf in enumerate([False, True]):
-            z, z_id = sample(prior_type, use_label_info=tf)
+            z, z_id = sample(prior_type, n_samples=batch_size, use_label_info=tf)
 
             ax = axes[j, i]
             s = ax.scatter(z[:, 0], z[:, 1], s=25, c=z_id, marker='o', edgecolor='none', cmap=discrete_cmap(10, 'jet'))
